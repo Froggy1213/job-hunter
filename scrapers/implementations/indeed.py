@@ -47,6 +47,7 @@ import re
 from urllib.parse import urljoin
 
 from playwright.async_api import Page, async_playwright
+from playwright_stealth import stealth
 
 from models.enums import SourcePlatform
 from models.job_posting import JobPosting
@@ -111,8 +112,8 @@ class IndeedScraper(BaseScraper):
     async def fetch_jobs(self) -> list[JobPosting]:
         """Navigate Indeed search results with anti-bot countermeasures.
 
-        Returns an empty list gracefully if Cloudflare blocks the
-        request or a CAPTCHA appears.
+        Visits the home page first to establish a session, then slowly
+        navigates to the search URL with human-like delays.
         """
         all_jobs: list[JobPosting] = []
 
@@ -131,9 +132,29 @@ class IndeedScraper(BaseScraper):
                     timezone_id="Asia/Tokyo",
                     user_agent=self._user_agent,
                     viewport={"width": 1920, "height": 1080},
+                    extra_http_headers={
+                        "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+                    },
                 )
                 page = await context.new_page()
 
+                # --- Inject stealth evasions ---
+                stealth(page)
+
+                # --- Step 1: Visit home page to establish session ---
+                logger.debug("Indeed: visiting home page to warm up session")
+                try:
+                    await page.goto(
+                        _BASE_URL,
+                        wait_until="domcontentloaded",
+                        timeout=15_000,
+                    )
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
+                    await self._scroll_like_human(page)
+                except Exception:
+                    logger.debug("Home page visit failed, continuing anyway")
+
+                # --- Step 2: Search ---
                 for page_num in range(_MAX_PAGES):
                     start_offset = page_num * _JOBS_PER_PAGE
                     url = self._build_page_url(start_offset)
@@ -143,37 +164,27 @@ class IndeedScraper(BaseScraper):
                         extra={"page": page_num + 1, "offset": start_offset},
                     )
 
-                    # --- Pre-navigation delay (random) ---
-                    await asyncio.sleep(random.uniform(1.0, 3.0))
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
 
                     try:
                         await page.goto(
                             url,
                             wait_until="domcontentloaded",
                             timeout=_NAV_TIMEOUT,
+                            referer=_BASE_URL + "/",
                         )
                     except Exception:
-                        logger.warning(
-                            "Indeed navigation failed (possible block)",
-                            extra={"url": url},
-                        )
+                        logger.warning("Indeed navigation failed")
                         self._consecutive_empty += 1
                         break
 
-                    # --- Post-navigation breathing room ---
-                    await asyncio.sleep(random.uniform(1.5, 3.0))
+                    await asyncio.sleep(random.uniform(2.0, 4.0))
 
-                    # --- Check for block / CAPTCHA ---
                     if await self._is_blocked(page):
-                        logger.warning(
-                            "Indeed returned a block page or CAPTCHA -- aborting"
-                        )
+                        logger.warning("Indeed block detected -- aborting")
                         break
 
-                    # --- Human-like scrolling ---
                     await self._scroll_like_human(page)
-
-                    # --- Let lazy-loaded cards render ---
                     await asyncio.sleep(random.uniform(1.0, 2.0))
 
                     # --- Parse ---

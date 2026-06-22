@@ -23,7 +23,7 @@ from scrapers.base import BaseScraper
 logger = logging.getLogger("job_hunter.scraper.mynavi")
 
 _BASE_URL = "https://tenshoku.mynavi.jp"
-_SEARCH_PATH = "/shutoken/list/p13/o1A/"
+_SEARCH_PATH = "/shutoken/list/p13/kwWebデザイナー/"
 _MAX_PAGES = 2
 _PAGE_DELAY = 2.0
 _NAV_TIMEOUT = 30_000
@@ -145,8 +145,12 @@ class MynaviScraper(BaseScraper):
         cards: list[JobPosting] = []
         for item in raw_items:
             try:
+                title = str(item["title"])[:500]
+                if not self.is_target_job(title):
+                    logger.debug("Skipping non-target Mynavi job: %s", title)
+                    continue
                 cards.append(JobPosting(
-                    title=str(item["title"])[:500],
+                    title=title,
                     company=str(item["company"])[:250],
                     url=item["url"],  # type: ignore[arg-type]
                     location=str(item["location"])[:250],

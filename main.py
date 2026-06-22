@@ -50,7 +50,6 @@ from scrapers.implementations.dummy_scraper import DummyScraper
 from scrapers.implementations.mynavi import MynaviScraper
 from scrapers.implementations.gaijinpot import GaijinPotScraper
 from scrapers.implementations.green import GreenScraper
-from scrapers.implementations.indeed import IndeedScraper
 from scrapers.implementations.wantedly import WantedlyScraper
 from scrapers.orchestrator import ScraperOrchestrator
 
@@ -101,7 +100,7 @@ async def main() -> None:
         WantedlyScraper(headless=settings.playwright_headless),
         GreenScraper(headless=settings.playwright_headless),
         GaijinPotScraper(headless=settings.playwright_headless),
-        IndeedScraper(headless=settings.playwright_headless),
+        # IndeedScraper(headless=settings.playwright_headless),  # Отключен: Cloudflare блок
     ]
     orchestrator = ScraperOrchestrator(scrapers, repository)
     logger.info(

@@ -52,29 +52,7 @@ class BaseScraper(ABC):
     )
 
     def __init__(self, headless: bool = True) -> None:
-        """Initialise the scraper.Act as an Expert Python Developer. We are continuing to build our job aggregator bot. Now we need to implement a scraper for GaijinPot Jobs (jobs.gaijinpot.com), which is the top platform for foreigners seeking work in Japan (often offering visa support and English-friendly environments).
-
-Please create a `GaijinPotScraper` class that inherits from our existing `BaseScraper`.
-
-### Requirements:
-1. **Target URL Strategy:** Construct the search URL targeting Tokyo and Design/Creative/IT keywords. (e.g., `https://jobs.gaijinpot.com/job/index/keywords/design/region/22` - where region 22 is usually Tokyo, or simply use keyword-based search URLs).
-2. **Playwright Automation:**
-   - Use async Playwright to navigate.
-   - Wait for the job listing cards to appear. GaijinPot uses standard HTML tables or lists for job postings.
-   - Handle pagination using URL parameters (e.g., `&page=X` or `/page/X`). Implement logic to scrape up to 2 pages maximum.
-3. **Data Extraction:**
-   - Extract the Job Title, Company Name, and the direct URL to the job posting.
-   - GaijinPot URLs are usually absolute, but if they are relative, use `urllib.parse.urljoin`.
-   - Map these to the `JobPosting` data model, setting `source_platform` to "GAIJINPOT".
-4. **Integration:**
-   - Add `GAIJINPOT` to the `SourcePlatform` enum (if not already present).
-   - Save the code in `scrapers/implementations/gaijinpot.py`.
-   - Update `main.py` to register this new scraper in the `ScraperOrchestrator`.
-
-### Constraints:
-- Include robust error handling (try/except blocks) per job card so a single malformed card doesn't break the whole loop.
-- Use the same stealth settings (User-Agent, locale) for consistency.
-- Output ONLY the necessary Python code and brief instructions for registration.
+        """Initialise the scraper.
 
         Args:
             headless: Whether to launch the browser in headless mode.
@@ -82,6 +60,45 @@ Please create a `GaijinPotScraper` class that inherits from our existing `BaseSc
                 is doing.
         """
         self._headless = headless
+
+    # ------------------------------------------------------------------
+    # Job title filter (shared across all scrapers)
+    # ------------------------------------------------------------------
+
+    # Titles containing any of these words are REJECTED.
+    _STOP_WORDS: set[str] = {
+        "cad", "mechanical", "machine", "architect", "fashion",
+        "game", "3d", "cg", "video", "movie",
+        "機械", "建築", "アパレル", "ゲーム", "映像", "施工",
+    }
+
+    # Titles MUST contain at least one of these words to be ACCEPTED.
+    _TARGET_WORDS: set[str] = {
+        "web", "ui", "ux", "graphic", "designer",
+        "デザイン", "デザイナー", "フロントエンド",
+    }
+
+    @staticmethod
+    def is_target_job(title: str) -> bool:
+        """Return ``True`` if *title* is a target design job.
+
+        Filtering logic (case-insensitive):
+
+        1. If *title* contains any stop-word → reject immediately.
+        2. If *title* contains any target word → accept.
+        3. Otherwise → reject.
+        """
+        lower = title.lower()
+
+        for stop in BaseScraper._STOP_WORDS:
+            if stop in lower:
+                return False
+
+        for target in BaseScraper._TARGET_WORDS:
+            if target in lower:
+                return True
+
+        return False
 
     # ------------------------------------------------------------------
     # Subclass contract

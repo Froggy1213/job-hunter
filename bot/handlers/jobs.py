@@ -85,8 +85,8 @@ async def cmd_jobs(
 
     if len(jobs) > _MAX_JOBS_PER_MESSAGE:
         text += (
-            f"\n\n_Showing {_MAX_JOBS_PER_MESSAGE} "
-            f"of {len(jobs)} results._"
+            f"\n\nShowing {_MAX_JOBS_PER_MESSAGE} "
+            f"of {len(jobs)} results\\."
         )
 
     await message.answer(

@@ -148,8 +148,12 @@ class WantedlyScraper(BaseScraper):
         cards: list[JobPosting] = []
         for item in raw_items:
             try:
+                title = str(item["title"])[:500]
+                if not self.is_target_job(title):
+                    logger.debug("Skipping non-target Wantedly job: %s", title)
+                    continue
                 cards.append(JobPosting(
-                    title=str(item["title"])[:500],
+                    title=title,
                     company=str(item["company"])[:250],
                     url=item["url"],  # type: ignore[arg-type]
                     location=str(item["location"])[:250],

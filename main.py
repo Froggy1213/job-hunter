@@ -123,6 +123,7 @@ async def main() -> None:
 
     # Middleware -- injects Container into every handler's data dict
     dp.message.middleware(ContainerMiddleware(container))
+    dp.callback_query.middleware(ContainerMiddleware(container))
 
     # Routers -- each module exports a standalone aiogram.Router
     dp.include_router(start_handler.router)
@@ -158,12 +159,12 @@ async def main() -> None:
             await bot.send_message(
                 chat_id=settings.admin_chat_id,
                 text=(
-                    f"🔔 *Scrape complete\\!*\n"
-                    f"Found *{total_new}* new job listing\\(s\\):\n"
+                    f"<b>🔔 Scrape complete!</b>\n"
+                    f"Found <b>{total_new}</b> new job listing(s):\n"
                     f"{summary}\n\n"
-                    f"Use `/jobs` to view them\\."
+                    f"Use /jobs to view them."
                 ),
-                parse_mode="MarkdownV2",
+                parse_mode="HTML",
             )
             logger.info(
                 "Scheduled scrape notification sent",

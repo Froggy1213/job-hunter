@@ -1,28 +1,45 @@
-"""/start command handler.
-
-The entry point for users -- shows available commands and a brief
-description of what the bot does.
-"""
+"""/start and /stats command handlers."""
 
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
+
+from core.container import Container
 
 router = Router(name="start_handler")
 
 
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    """Handle the /start command.
-
-    Sends a welcome message with the list of available commands.
-    Does not require any injected dependencies.
-    """
+    """Welcome message with available commands."""
     await message.answer(
-        "👋 Welcome to Job Hunter Bot!\n\n"
-        "I aggregate design job listings from Japanese job boards.\n\n"
-        "Available commands:\n"
-        "/jobs — List all collected jobs\n"
-        "/jobs <source> — Filter by source (e.g. /jobs dummy)\n"
-        "/start — Show this message",
+        "<b>👋 Welcome to Job Hunter Bot!</b>\n\n"
+        "I collect <b>Web, UI/UX, and Graphic Design</b> jobs "
+        "from Japanese job boards.\n\n"
+        "<b>Commands:</b>\n"
+        "/jobs — Browse all jobs (paginated)\n"
+        "/jobs &lt;source&gt; — Filter by platform\n"
+        "/stats — Job counts by platform\n"
+        "/start — This message",
+        parse_mode="HTML",
     )
+
+
+@router.message(Command("stats"))
+async def cmd_stats(message: Message, container: Container) -> None:
+    """Show job counts per platform."""
+    from models.enums import SourcePlatform
+
+    lines = ["<b>📊 Job Statistics</b>\n"]
+    total = 0
+
+    for platform in SourcePlatform:
+        if platform == SourcePlatform.DUMMY:
+            continue
+        jobs = await container.repository.get_by_source(platform)
+        count = len(jobs)
+        total += count
+        lines.append(f"• <code>{platform.value}</code>: {count}")
+
+    lines.append(f"\n<b>Total: {total}</b>")
+    await message.answer("\n".join(lines), parse_mode="HTML")

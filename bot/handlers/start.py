@@ -4,6 +4,7 @@ from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
 
+from bot.utils import main_keyboard
 from core.container import Container
 
 router = Router(name="start_handler")
@@ -11,19 +12,19 @@ router = Router(name="start_handler")
 
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
-    """Welcome message with available commands."""
+    """Welcome message with available commands and main keyboard."""
     await message.answer(
         "<b>👋 Welcome to Job Hunter Bot!</b>\n\n"
         "I collect <b>Web, UI/UX, and Graphic Design</b> jobs "
         "from Japanese job boards.\n\n"
-        "<b>Commands:</b>\n"
+        "Use the buttons below or type commands:\n"
         "/jobs — Browse all jobs (paginated)\n"
         "/jobs &lt;source&gt; — Filter by platform\n"
         "/stats — Job counts by platform\n"
         "/subscribe — Get notified about new jobs\n"
-        "/unsubscribe — Stop notifications\n"
-        "/start — This message",
+        "/unsubscribe — Stop notifications",
         parse_mode="HTML",
+        reply_markup=main_keyboard(),
     )
 
 
@@ -44,7 +45,9 @@ async def cmd_stats(message: Message, container: Container) -> None:
         lines.append(f"• <code>{platform.value}</code>: {count}")
 
     lines.append(f"\n<b>Total: {total}</b>")
-    await message.answer("\n".join(lines), parse_mode="HTML")
+    await message.answer(
+        "\n".join(lines), parse_mode="HTML", reply_markup=main_keyboard(),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +69,12 @@ async def cmd_subscribe(message: Message, container: Container) -> None:
             "<b>✅ Subscribed!</b>\n"
             "You will receive a notification whenever new jobs are found.",
             parse_mode="HTML",
+            reply_markup=main_keyboard(),
         )
     else:
         await message.answer(
-            "ℹ️ You are already subscribed. Use /unsubscribe to stop notifications."
+            "ℹ️ You are already subscribed. Use Unsubscribe button to stop notifications.",
+            reply_markup=main_keyboard(),
         )
 
 
@@ -86,6 +91,10 @@ async def cmd_unsubscribe(message: Message, container: Container) -> None:
         await message.answer(
             "<b>🔕 Unsubscribed.</b> You will no longer receive job notifications.",
             parse_mode="HTML",
+            reply_markup=main_keyboard(),
         )
     else:
-        await message.answer("ℹ️ You were not subscribed.")
+        await message.answer(
+            "ℹ️ You were not subscribed.",
+            reply_markup=main_keyboard(),
+        )

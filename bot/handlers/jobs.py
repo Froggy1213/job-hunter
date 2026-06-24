@@ -18,7 +18,7 @@ from aiogram.types import (
     Message,
 )
 
-from bot.utils import escape, job_card
+from bot.utils import escape, job_card, main_keyboard
 from core.container import Container
 from models.enums import SourcePlatform
 
@@ -44,7 +44,9 @@ async def cmd_jobs(
         # Invalid source name -- error already sent by _parse_source.
         valid = ", ".join(p.value for p in SourcePlatform if p != SourcePlatform.DUMMY)
         await message.answer(
-            f"❓ Unknown source. Available: {valid}", parse_mode="HTML",
+            f"❓ Unknown source. Available: {valid}",
+            parse_mode="HTML",
+            reply_markup=main_keyboard(),
         )
         return
 
@@ -190,7 +192,9 @@ async def cmd_scrape(message: Message, container: Container) -> None:
     if message.from_user is None or message.from_user.id != container.settings.admin_chat_id:
         return
 
-    status_msg = await message.answer("⏳ Starting scrape...")
+    status_msg = await message.answer(
+        "⏳ Starting scrape...", reply_markup=main_keyboard(),
+    )
 
     result = await container.orchestrator.run_all()
     total_new = sum(result.counts.values())

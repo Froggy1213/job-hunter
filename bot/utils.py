@@ -15,6 +15,31 @@ def escape(text: str) -> str:
     return _escape_html(str(text), quote=False)
 
 
+from aiogram.types import KeyboardButton, ReplyKeyboardMarkup
+
+
+def main_keyboard() -> ReplyKeyboardMarkup:
+    """Return the persistent main-menu keyboard.
+
+    Buttons send commands so existing Command() handlers process them
+    without any extra text-matching logic.
+    """
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [
+                KeyboardButton(text="/jobs"),
+                KeyboardButton(text="/stats"),
+            ],
+            [
+                KeyboardButton(text="/subscribe"),
+                KeyboardButton(text="/unsubscribe"),
+            ],
+        ],
+        resize_keyboard=True,
+        input_field_placeholder="Pick an action…",
+    )
+
+
 def job_card(job, index: int) -> str:
     """Format a single job posting as an HTML card block.
 

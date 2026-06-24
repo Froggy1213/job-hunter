@@ -11,13 +11,29 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass, field
 from typing import Sequence
 
 from database.repository import JobRepository
 from models.enums import SourcePlatform
+from models.job_posting import JobPosting
 from scrapers.base import BaseScraper
 
 logger = logging.getLogger("job_hunter.orchestrator")
+
+
+@dataclass
+class ScrapeResult:
+    """Result of a full scrape run across all platforms.
+
+    Attributes:
+        counts: Number of *new* jobs per platform.
+        new_jobs: The actual ``JobPosting`` objects that were persisted,
+            in the order they were scraped.
+    """
+
+    counts: dict[SourcePlatform, int] = field(default_factory=dict)
+    new_jobs: list[JobPosting] = field(default_factory=list)
 
 
 class ScraperOrchestrator:
@@ -42,7 +58,7 @@ class ScraperOrchestrator:
         """Return the platforms covered by registered scrapers."""
         return [s.platform for s in self._scrapers]
 
-    async def run_all(self) -> dict[SourcePlatform, int]:
+    async def run_all(self) -> ScrapeResult:
         """Execute all scrapers in parallel and persist new listings.
 
         Each scraper runs in its own task.  Exceptions from individual
@@ -54,9 +70,8 @@ class ScraperOrchestrator:
         so scrapers can be re-run safely at any interval.
 
         Returns:
-            A dictionary mapping each ``SourcePlatform`` to the number
-            of **new** jobs persisted during this run.  Failed scrapers
-            always contribute ``0``.
+            A ``ScrapeResult`` with counts of new jobs per platform and
+            the list of ``JobPosting`` objects that were persisted.
         """
         logger.info(
             "Starting scrape run",
@@ -69,6 +84,7 @@ class ScraperOrchestrator:
         )
 
         counts: dict[SourcePlatform, int] = {}
+        all_new_jobs: list[JobPosting] = []
         for scraper, result in zip(self._scrapers, results):
             if isinstance(result, Exception):
                 logger.error(
@@ -80,16 +96,18 @@ class ScraperOrchestrator:
                 )
                 counts[scraper.platform] = 0
             else:
-                counts[scraper.platform] = result
+                scount, sjobs = result
+                counts[scraper.platform] = scount
+                all_new_jobs.extend(sjobs)
 
         total = sum(counts.values())
         logger.info("Scrape run complete", extra={"new_jobs": total, "by_platform": counts})
-        return counts
+        return ScrapeResult(counts=counts, new_jobs=all_new_jobs)
 
-    async def _run_one(self, scraper: BaseScraper) -> int:
+    async def _run_one(self, scraper: BaseScraper) -> tuple[int, list[JobPosting]]:
         """Execute a single scraper, deduplicate, and persist.
 
-        Returns the count of *new* jobs saved for this scraper.
+        Returns a tuple of (count of new jobs, list of new JobPosting objects).
         """
         jobs = await scraper.fetch_jobs()
         logger.debug(
@@ -98,6 +116,7 @@ class ScraperOrchestrator:
         )
 
         new_count = 0
+        new_jobs: list[JobPosting] = []
         for job in jobs:
             url_str = str(job.url)
             if await self._repository.exists(url_str):
@@ -106,6 +125,7 @@ class ScraperOrchestrator:
 
             await self._repository.save(job)
             new_count += 1
+            new_jobs.append(job)
 
         logger.info(
             "Scraper finished",
@@ -115,4 +135,4 @@ class ScraperOrchestrator:
                 "new": new_count,
             },
         )
-        return new_count
+        return new_count, new_jobs

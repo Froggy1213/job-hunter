@@ -18,7 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from core.exceptions import RepositoryError
-from database.models import JobModel
+from database.models import JobModel, SubscriberModel
 from database.repository import JobRepository
 from models.enums import SourcePlatform
 from models.job_posting import JobPosting
@@ -127,3 +127,70 @@ class SQLAlchemyJobRepository(JobRepository):
             posted_at=job.posted_at,
             scraped_at=job.scraped_at,
         )
+
+
+# ---------------------------------------------------------------------------
+# Subscriber repository
+# ---------------------------------------------------------------------------
+
+
+class SQLAlchemySubscriberRepository:
+    """Persists Telegram subscriber chat IDs via SQLAlchemy async sessions.
+
+    Args:
+        session_factory: An ``async_sessionmaker`` bound to the async engine.
+    """
+
+    def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
+        self._session_factory = session_factory
+
+    async def add_subscriber(self, chat_id: int) -> bool:
+        """Add a chat ID to the subscribers table.
+
+        Returns:
+            ``True`` if the chat was newly subscribed, ``False`` if it
+            was already subscribed.
+        """
+        try:
+            async with self._session_factory() as session:
+                existing = await session.get(SubscriberModel, chat_id)
+                if existing is not None:
+                    return False
+                session.add(SubscriberModel(chat_id=chat_id))
+                await session.commit()
+                logger.info("New subscriber added", extra={"chat_id": chat_id})
+                return True
+        except Exception as exc:
+            raise RepositoryError(f"Failed to add subscriber {chat_id}: {exc}") from exc
+
+    async def remove_subscriber(self, chat_id: int) -> bool:
+        """Remove a chat ID from the subscribers table.
+
+        Returns:
+            ``True`` if the chat was unsubscribed, ``False`` if it wasn't
+            subscribed.
+        """
+        try:
+            async with self._session_factory() as session:
+                existing = await session.get(SubscriberModel, chat_id)
+                if existing is None:
+                    return False
+                await session.delete(existing)
+                await session.commit()
+                logger.info("Subscriber removed", extra={"chat_id": chat_id})
+                return True
+        except Exception as exc:
+            raise RepositoryError(
+                f"Failed to remove subscriber {chat_id}: {exc}"
+            ) from exc
+
+    async def get_all_subscribers(self) -> list[int]:
+        """Return all subscribed chat IDs."""
+        try:
+            async with self._session_factory() as session:
+                from sqlalchemy import select
+
+                result = await session.execute(select(SubscriberModel.chat_id))
+                return [row for row in result.scalars().all()]
+        except Exception as exc:
+            raise RepositoryError(f"Failed to fetch subscribers: {exc}") from exc

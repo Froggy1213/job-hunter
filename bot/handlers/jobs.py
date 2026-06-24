@@ -10,7 +10,13 @@ import logging
 
 from aiogram import Router, F
 from aiogram.filters import Command, CommandObject
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    LinkPreviewOptions,
+    Message,
+)
 
 from bot.utils import escape, job_card
 from core.container import Container
@@ -119,9 +125,9 @@ async def _show_page(
     keyboard = _build_nav_keyboard(page, total_pages, source)
 
     if edit:
-        await msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML", disable_web_page_preview=True)
+        await msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
     else:
-        await msg.answer(text, reply_markup=keyboard, parse_mode="HTML", disable_web_page_preview=True)
+        await msg.answer(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
 
 
 # ---------------------------------------------------------------------------
@@ -171,3 +177,37 @@ def _build_nav_keyboard(
         ))
 
     return InlineKeyboardMarkup(inline_keyboard=[buttons]) if buttons else None
+
+
+# ---------------------------------------------------------------------------
+# /scrape command (admin only)
+# ---------------------------------------------------------------------------
+
+
+@router.message(Command("scrape"))
+async def cmd_scrape(message: Message, container: Container) -> None:
+    """Manually trigger a full scrape cycle.  Admin only."""
+    if message.from_user is None or message.from_user.id != container.settings.admin_chat_id:
+        return
+
+    status_msg = await message.answer("⏳ Starting scrape...")
+
+    result = await container.orchestrator.run_all()
+    total_new = sum(result.counts.values())
+
+    if total_new > 0:
+        platform_lines = [
+            f"  • <code>{platform.value}</code>: {count} new"
+            for platform, count in result.counts.items()
+            if count > 0
+        ]
+        summary = "\n".join(platform_lines)
+        text = (
+            f"<b>✅ Scrape complete!</b>\n"
+            f"Found <b>{total_new}</b> new job listing(s):\n"
+            f"{summary}"
+        )
+    else:
+        text = "✅ Scrape complete! No new jobs found."
+
+    await status_msg.edit_text(text, parse_mode="HTML")

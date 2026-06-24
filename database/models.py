@@ -74,3 +74,20 @@ class JobModel(Base):
 
     def __repr__(self) -> str:
         return f"<JobModel id={self.id} url={self.url!r} platform={self.source_platform!r}>"
+
+
+class SubscriberModel(Base):
+    """Telegram chat IDs that receive new-job notifications.
+
+    The ``chat_id`` is the Telegram chat ID (user or group).  It is the
+    natural primary key -- a chat is either subscribed or it isn't.
+    """
+
+    __tablename__ = "subscribers"
+
+    chat_id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, comment="Telegram chat ID"
+    )
+
+    def __repr__(self) -> str:
+        return f"<SubscriberModel chat_id={self.chat_id}>"

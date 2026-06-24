@@ -1,4 +1,4 @@
-"""/start and /stats command handlers."""
+"""/start, /stats, /subscribe, and /unsubscribe command handlers."""
 
 from aiogram import Router
 from aiogram.filters import Command
@@ -20,6 +20,8 @@ async def cmd_start(message: Message) -> None:
         "/jobs — Browse all jobs (paginated)\n"
         "/jobs &lt;source&gt; — Filter by platform\n"
         "/stats — Job counts by platform\n"
+        "/subscribe — Get notified about new jobs\n"
+        "/unsubscribe — Stop notifications\n"
         "/start — This message",
         parse_mode="HTML",
     )
@@ -43,3 +45,47 @@ async def cmd_stats(message: Message, container: Container) -> None:
 
     lines.append(f"\n<b>Total: {total}</b>")
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+# ---------------------------------------------------------------------------
+# Subscription commands
+# ---------------------------------------------------------------------------
+
+
+@router.message(Command("subscribe"))
+async def cmd_subscribe(message: Message, container: Container) -> None:
+    """Subscribe to new-job notifications."""
+    if message.from_user is None:
+        return
+
+    chat_id = message.from_user.id
+    added = await container.subscriber_repository.add_subscriber(chat_id)
+
+    if added:
+        await message.answer(
+            "<b>✅ Subscribed!</b>\n"
+            "You will receive a notification whenever new jobs are found.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            "ℹ️ You are already subscribed. Use /unsubscribe to stop notifications."
+        )
+
+
+@router.message(Command("unsubscribe"))
+async def cmd_unsubscribe(message: Message, container: Container) -> None:
+    """Unsubscribe from new-job notifications."""
+    if message.from_user is None:
+        return
+
+    chat_id = message.from_user.id
+    removed = await container.subscriber_repository.remove_subscriber(chat_id)
+
+    if removed:
+        await message.answer(
+            "<b>🔕 Unsubscribed.</b> You will no longer receive job notifications.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer("ℹ️ You were not subscribed.")

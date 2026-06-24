@@ -15,6 +15,8 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from config.settings import Settings
     from database.repository import JobRepository
+    from database.sqlalchemy_repository import SQLAlchemySubscriberRepository
+    from scrapers.orchestrator import ScraperOrchestrator
 
 
 @dataclass
@@ -34,6 +36,12 @@ class Container:
 
     repository: JobRepository | None = None
     """Job posting repository (abstract interface)."""
+
+    orchestrator: ScraperOrchestrator | None = None
+    """Scraper orchestrator for manual scrape triggers."""
+
+    subscriber_repository: SQLAlchemySubscriberRepository | None = None
+    """Subscriber persistence (chat IDs for notifications)."""
 
     logger: logging.Logger | None = field(default=None, repr=False)
     """Configured root logger for the application."""

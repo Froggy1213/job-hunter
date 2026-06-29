@@ -37,3 +37,6 @@ class SourcePlatform(StrEnum):
 
     INDEED = "indeed"
     """Indeed Japan (jp.indeed.com) -- the largest job search engine."""
+
+    MYNAVI_2027 = "mynavi_2027"
+    """Mynavi 2027 新卒 (job.mynavi.jp) -- new graduate recruitment."""

@@ -46,10 +46,7 @@ from core.logging_setup import setup_logging
 from database.engine import create_engine_and_session
 from database.models import Base
 from database.sqlalchemy_repository import SQLAlchemyJobRepository, SQLAlchemySubscriberRepository
-from scrapers.implementations.dummy_scraper import DummyScraper
-from scrapers.implementations.mynavi import MynaviScraper
-from scrapers.implementations.gaijinpot import GaijinPotScraper
-from scrapers.implementations.green import GreenScraper
+from scrapers.implementations.mynavi2027 import Mynavi2027Scraper
 from scrapers.implementations.wantedly import WantedlyScraper
 from scrapers.orchestrator import ScraperOrchestrator
 
@@ -96,12 +93,8 @@ async def main() -> None:
 
     # ---- 4. Scrapers (Strategy pattern -- add new boards here) ----
     scrapers = [
-        DummyScraper(headless=settings.playwright_headless),
-        MynaviScraper(headless=settings.playwright_headless),
+        Mynavi2027Scraper(headless=settings.playwright_headless),
         WantedlyScraper(headless=settings.playwright_headless),
-        GreenScraper(headless=settings.playwright_headless),
-        GaijinPotScraper(headless=settings.playwright_headless),
-        # IndeedScraper(headless=settings.playwright_headless),  # Отключен: Cloudflare блок
     ]
     orchestrator = ScraperOrchestrator(scrapers, repository)
     logger.info(

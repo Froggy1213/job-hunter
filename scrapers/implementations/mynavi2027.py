@@ -1,0 +1,272 @@
+"""Mynavi 2027 新卒 (job.mynavi.jp) scraper.
+
+Targets new-graduate design/creative positions from Mynavi's
+shinsotsu (new graduate) recruitment platform.
+
+URL structure:
+    Search:   https://job.mynavi.jp/27/pc/search/occ{CODE}.html
+    Detail:   https://job.mynavi.jp/27/pc/search/corp{ID}/employment.html
+
+Occupation codes:
+    occ415 — WEBデザイナー
+    occ580 — グラフィックデザイナー
+    occ620 — 広告デザイナー
+
+Pagination:
+    JS-driven form POST.  Playwright clicks ``ul.pagingLink a``
+    elements and waits for ``domcontentloaded``.  100 cards/page,
+    12 pages max; we cap at ``_MAX_PAGES`` per occupation.
+
+Design decisions:
+    - ``page.evaluate()`` for batch extraction (one JS round-trip).
+    - One occupation at a time on a shared page (simpler than parallel
+      contexts; parallelisation left for a later performance pass).
+    - ``page.wait_for_timeout()`` instead of ``asyncio.sleep()`` inside
+      Playwright scope (keeps browser event loop alive).
+    - Cross-occupation deduplication via ``seen_urls`` set passed through
+      the call chain so a company listing multiple occ codes appears once.
+"""
+
+from __future__ import annotations
+
+import logging
+
+from playwright.async_api import Page, async_playwright
+
+from models.enums import SourcePlatform
+from models.job_posting import JobPosting
+from scrapers.base import BaseScraper
+
+logger = logging.getLogger("job_hunter.scraper.mynavi2027")
+
+_BASE_URL = "https://job.mynavi.jp"
+_OCC_CODES = ["415", "580", "620"]
+_MAX_PAGES = 2          # pages per occupation (up to 100 cards each)
+_NAV_TIMEOUT = 30_000   # ms — page navigation timeout
+_RENDER_DELAY_MS = 1_500  # ms — wait after DOM ready for JS render
+
+_OCC_LABELS = {
+    "415": "WEBデザイナー (新卒2027)",
+    "580": "グラフィックデザイナー (新卒2027)",
+    "620": "広告デザイナー (新卒2027)",
+}
+
+# Selector that confirms job cards are present on the page.
+_CARD_SELECTOR = 'h3 a[href*="/corp"][href*="employment"]'
+
+
+class Mynavi2027Scraper(BaseScraper):
+    """Scrape new-graduate design jobs from Mynavi 2027."""
+
+    _user_agent: str = (
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    )
+
+    @property
+    def platform(self) -> SourcePlatform:
+        return SourcePlatform.MYNAVI_2027
+
+    # ------------------------------------------------------------------
+    # Main entry point
+    # ------------------------------------------------------------------
+
+    async def fetch_jobs(self) -> list[JobPosting]:
+        """Scrape each occupation code with pagination."""
+        all_jobs: list[JobPosting] = []
+        # FIX 5: cross-occupation deduplication — one set for the whole run.
+        seen_urls: set[str] = set()
+
+        async with async_playwright() as pw:
+            browser = await pw.chromium.launch(headless=self._headless)
+            try:
+                context = await browser.new_context(
+                    locale="ja-JP",
+                    timezone_id="Asia/Tokyo",
+                    user_agent=self._user_agent,
+                    viewport={"width": 1280, "height": 900},
+                )
+                page = await context.new_page()
+
+                for occ in _OCC_CODES:
+                    url = f"{_BASE_URL}/27/pc/search/occ{occ}.html"
+                    logger.info("Scraping Mynavi2027 occ=%s", occ)
+                    try:
+                        occ_jobs = await self._scrape_occ(page, occ, url, seen_urls)
+                        all_jobs.extend(occ_jobs)
+                        logger.info(
+                            "Mynavi2027 occ=%s done",
+                            occ,
+                            extra={"jobs": len(occ_jobs)},
+                        )
+                    except Exception:
+                        logger.exception("Mynavi2027 occ=%s failed", occ)
+                        continue
+            finally:
+                await browser.close()
+
+        logger.info("Mynavi2027 scrape complete", extra={"total": len(all_jobs)})
+        return all_jobs
+
+    # ------------------------------------------------------------------
+    # Per-occupation scraping with pagination
+    # ------------------------------------------------------------------
+
+    async def _scrape_occ(
+        self,
+        page: Page,
+        occ: str,
+        base_url: str,
+        seen_urls: set[str],
+    ) -> list[JobPosting]:
+        """Navigate an occupation page, then walk pagination.
+
+        The first page is a normal GET.  Subsequent pages are loaded
+        by clicking the page-number link in ``ul.pagingLink`` and
+        waiting for the form-driven POST to reload the page.
+        """
+        jobs: list[JobPosting] = []
+
+        # --- Page 1 (initial GET) ---
+        await page.goto(base_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT)
+        # FIX 3: _wait_for_cards on every page, not just page 1.
+        await self._wait_for_cards(page)
+        jobs.extend(await self.parse_page(page, occ, seen_urls))
+
+        if _MAX_PAGES <= 1:
+            return jobs
+
+        # --- Pages 2 .. _MAX_PAGES ---
+        for page_num in range(2, _MAX_PAGES + 1):
+            # FIX 1: keep locator and .first separate so count() is meaningful.
+            nav_locator = page.locator(f'ul.pagingLink a:has-text("{page_num}")')
+            if await nav_locator.count() == 0:
+                logger.debug("No pagination link for page %d — stopping", page_num)
+                break
+
+            logger.debug("Mynavi2027 occ=%s → page %d", occ, page_num)
+            await nav_locator.first.click()
+            await page.wait_for_load_state("domcontentloaded", timeout=_NAV_TIMEOUT)
+            # FIX 3: wait for cards after every navigation, not just page 1.
+            await self._wait_for_cards(page)
+
+            page_jobs = await self.parse_page(page, occ, seen_urls)
+            if not page_jobs:
+                break
+            jobs.extend(page_jobs)
+
+        return jobs
+
+    # ------------------------------------------------------------------
+    # Helpers
+    # ------------------------------------------------------------------
+
+    async def _wait_for_cards(self, page: Page) -> None:
+        """Wait until job cards are attached to the DOM, then let JS settle.
+
+        Used after every navigation (page 1 GET and subsequent pagination
+        clicks) to avoid calling ``parse_page`` on a partially-rendered DOM.
+        """
+        await page.wait_for_selector(_CARD_SELECTOR, state="attached", timeout=10_000)
+        # FIX 2: single consolidated delay — no double-wait anymore.
+        await page.wait_for_timeout(_RENDER_DELAY_MS)
+
+    # ------------------------------------------------------------------
+    # Card extraction (batch via page.evaluate)
+    # ------------------------------------------------------------------
+
+    async def parse_page(
+        self,
+        page: Page,
+        occ_code: str,
+        seen_urls: set[str],
+    ) -> list[JobPosting]:
+        """Extract company cards from the current page via one JS round-trip."""
+        occ_label = _OCC_LABELS.get(occ_code, occ_code)
+
+        raw_items: list[dict] = await page.evaluate(
+            """(occLabel) => {
+                const results = [];
+                const seen = new Set();
+                const links = document.querySelectorAll(
+                    'h3 a[href*="/corp"][href*="employment"]'
+                );
+                for (const link of links) {
+                    try {
+                        const href = link.getAttribute('href');
+                        if (!href) continue;
+
+                        const idMatch = href.match(/corp(\\d+)/);
+                        if (!idMatch) continue;
+                        const corpId = idMatch[1];
+                        if (seen.has(corpId)) continue;
+                        seen.add(corpId);
+
+                        const company = link.textContent.trim();
+
+                        // Card resolution for location extraction
+                        const card = link.closest('li')
+                                  || link.closest('[class*="corp"]')
+                                  || link.closest('[class*="company"]');
+
+                        // Title = occupation label.
+                        // This page lists COMPANIES that hire for the
+                        // occupation, not individual job posts.  There is
+                        // no per-card job title — the first <p> contains
+                        // industry tags (業種), not role names.  Using the
+                        // occupation label is the correct semantic choice
+                        // and guarantees is_target_job() passes.
+                        const title = occLabel;
+
+                        const cardText = card ? card.textContent : '';
+                        const location = /東京/.test(cardText) ? 'Tokyo' : 'Japan';
+
+                        const url = href.startsWith('http')
+                            ? href.split('?')[0]
+                            : 'https://job.mynavi.jp' + href.split('?')[0];
+
+                        results.push({
+                            corpId,
+                            title,
+                            company,
+                            url,
+                            location,
+                        });
+                    } catch (e) { /* skip malformed card */ }
+                }
+                return results;
+            }""",
+            occ_label,
+        )
+
+        cards: list[JobPosting] = []
+        for item in raw_items:
+            try:
+                url = str(item["url"])
+
+                # FIX 5: skip URLs already collected from an earlier occ.
+                if url in seen_urls:
+                    logger.debug("Dedup skip (cross-occ): %s", url)
+                    continue
+                seen_urls.add(url)
+
+                # FIX 4: is_target_job now receives the real card title,
+                # not the hardcoded occupation label.
+                title = str(item["title"])[:500]
+                if not self.is_target_job(title):
+                    logger.debug("Skipping non-target: %s", title)
+                    continue
+
+                cards.append(JobPosting(
+                    title=title,
+                    company=str(item["company"])[:250],
+                    url=url,  # type: ignore[arg-type]
+                    location=str(item["location"])[:250],
+                    source_platform=self.platform,
+                ))
+            except Exception:
+                logger.debug("Failed to map card", exc_info=True)
+                continue
+
+        return cards

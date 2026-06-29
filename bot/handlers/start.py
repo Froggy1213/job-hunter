@@ -37,8 +37,6 @@ async def cmd_stats(message: Message, container: Container) -> None:
     total = 0
 
     for platform in SourcePlatform:
-        if platform == SourcePlatform.DUMMY:
-            continue
         jobs = await container.repository.get_by_source(platform)
         count = len(jobs)
         total += count

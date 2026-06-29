@@ -16,13 +16,13 @@ def test_minimal_job_posting():
         company="Test株式会社",
         url=HttpUrl("https://example.com/jobs/1"),
         location="Tokyo",
-        source_platform=SourcePlatform.DUMMY,
+        source_platform=SourcePlatform.WANTEDLY,
     )
     assert job.title == "Software Engineer"
     assert job.company == "Test株式会社"
     assert str(job.url) == "https://example.com/jobs/1"
     assert job.location == "Tokyo"
-    assert job.source_platform == SourcePlatform.DUMMY
+    assert job.source_platform == SourcePlatform.WANTEDLY
     # Auto-filled fields
     assert job.description is None
     assert job.salary is None
@@ -39,7 +39,7 @@ def test_full_job_posting():
         company="DesignCo",
         url=HttpUrl("https://jobs.example.com/ux"),
         location="Tokyo, Shibuya-ku",
-        source_platform=SourcePlatform.DUMMY,
+        source_platform=SourcePlatform.WANTEDLY,
         description="Lead our design system.",
         salary="¥8M",
         posted_at=posted,
@@ -57,7 +57,7 @@ def test_immutable_job_posting():
         company="Co",
         url=HttpUrl("https://example.com/j/2"),
         location="Osaka",
-        source_platform=SourcePlatform.DUMMY,
+        source_platform=SourcePlatform.WANTEDLY,
     )
     # ``frozen=True`` prevents ``__setattr__`` on the model instance.
     with pytest.raises(ValidationError):
@@ -72,7 +72,7 @@ def test_title_must_not_be_empty():
             company="Co",
             url=HttpUrl("https://example.com/j/3"),
             location="Tokyo",
-            source_platform=SourcePlatform.DUMMY,
+            source_platform=SourcePlatform.WANTEDLY,
         )
 
 
@@ -84,7 +84,7 @@ def test_invalid_url():
             company="Co",
             url="not-a-url",  # type: ignore[arg-type]
             location="Tokyo",
-            source_platform=SourcePlatform.DUMMY,
+            source_platform=SourcePlatform.WANTEDLY,
         )
 
 
@@ -99,10 +99,10 @@ def test_serialization():
         company="Co",
         url=HttpUrl("https://x.com/j"),
         location="Tokyo",
-        source_platform=SourcePlatform.DUMMY,
+        source_platform=SourcePlatform.WANTEDLY,
     )
     data = job.model_dump(mode="json")
     assert isinstance(data["url"], str)
     assert data["url"] == "https://x.com/j"
-    assert data["source_platform"] == "dummy"
+    assert data["source_platform"] == "wantedly"
     assert isinstance(data["scraped_at"], str)

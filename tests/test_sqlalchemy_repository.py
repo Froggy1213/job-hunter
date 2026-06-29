@@ -20,7 +20,7 @@ def _make_job(title: str = "Software Engineer", url: str = "https://example.com/
         company="Test株式会社",
         url=HttpUrl(url),
         location="Tokyo",
-        source_platform=SourcePlatform.DUMMY,
+        source_platform=SourcePlatform.WANTEDLY,
     )
 
 
@@ -59,10 +59,10 @@ async def test_get_by_source_filter(repository):
     job = _make_job(url="https://example.com/jobs/src-filter")
     await repository.save(job)
 
-    # Should find it for DUMMY
-    jobs = await repository.get_by_source(SourcePlatform.DUMMY)
+    # Should find it for WANTEDLY
+    jobs = await repository.get_by_source(SourcePlatform.WANTEDLY)
     assert len(jobs) == 1
-    assert jobs[0].source_platform == SourcePlatform.DUMMY
+    assert jobs[0].source_platform == SourcePlatform.WANTEDLY
 
 
 @pytest.mark.asyncio

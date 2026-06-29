@@ -42,7 +42,7 @@ async def cmd_jobs(
     source = _parse_source(command.args)
     if source is False:
         # Invalid source name -- error already sent by _parse_source.
-        valid = ", ".join(p.value for p in SourcePlatform if p != SourcePlatform.DUMMY)
+        valid = ", ".join(p.value for p in SourcePlatform)
         await message.answer(
             f"❓ Unknown source. Available: {valid}",
             parse_mode="HTML",
@@ -146,9 +146,6 @@ def _parse_source(args: str | None) -> SourcePlatform | None | bool:
     if not args or not args.strip():
         return None
     source_str = args.strip().lower()
-    # Hide DUMMY from users.
-    if source_str == "dummy":
-        return False
     try:
         return SourcePlatform(source_str)
     except ValueError:

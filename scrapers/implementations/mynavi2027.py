@@ -2,29 +2,6 @@
 
 Targets new-graduate design/creative positions from Mynavi's
 shinsotsu (new graduate) recruitment platform.
-
-URL structure:
-    Search:   https://job.mynavi.jp/27/pc/search/occ{CODE}.html
-    Detail:   https://job.mynavi.jp/27/pc/search/corp{ID}/employment.html
-
-Occupation codes:
-    occ415 — WEBデザイナー
-    occ580 — グラフィックデザイナー
-    occ620 — 広告デザイナー
-
-Pagination:
-    JS-driven form POST.  Playwright clicks ``ul.pagingLink a``
-    elements and waits for ``domcontentloaded``.  100 cards/page,
-    12 pages max; we cap at ``_MAX_PAGES`` per occupation.
-
-Design decisions:
-    - ``page.evaluate()`` for batch extraction (one JS round-trip).
-    - One occupation at a time on a shared page (simpler than parallel
-      contexts; parallelisation left for a later performance pass).
-    - ``page.wait_for_timeout()`` instead of ``asyncio.sleep()`` inside
-      Playwright scope (keeps browser event loop alive).
-    - Cross-occupation deduplication via ``seen_urls`` set passed through
-      the call chain so a company listing multiple occ codes appears once.
 """
 
 from __future__ import annotations
@@ -46,9 +23,9 @@ _NAV_TIMEOUT = 30_000   # ms — page navigation timeout
 _RENDER_DELAY_MS = 1_500  # ms — wait after DOM ready for JS render
 
 _OCC_LABELS = {
-    "415": "WEBデザイナー (新卒2027)",
-    "580": "グラフィックデザイナー (新卒2027)",
-    "620": "広告デザイナー (新卒2027)",
+    "415": "WEBデザイナー",
+    "580": "グラフィックデザイナー",
+    "620": "広告デザイナー",
 }
 
 # Selector that confirms job cards are present on the page.
@@ -75,7 +52,6 @@ class Mynavi2027Scraper(BaseScraper):
     async def fetch_jobs(self) -> list[JobPosting]:
         """Scrape each occupation code with pagination."""
         all_jobs: list[JobPosting] = []
-        # FIX 5: cross-occupation deduplication — one set for the whole run.
         seen_urls: set[str] = set()
 
         async with async_playwright() as pw:
@@ -120,26 +96,16 @@ class Mynavi2027Scraper(BaseScraper):
         base_url: str,
         seen_urls: set[str],
     ) -> list[JobPosting]:
-        """Navigate an occupation page, then walk pagination.
-
-        The first page is a normal GET.  Subsequent pages are loaded
-        by clicking the page-number link in ``ul.pagingLink`` and
-        waiting for the form-driven POST to reload the page.
-        """
         jobs: list[JobPosting] = []
 
-        # --- Page 1 (initial GET) ---
         await page.goto(base_url, wait_until="domcontentloaded", timeout=_NAV_TIMEOUT)
-        # FIX 3: _wait_for_cards on every page, not just page 1.
         await self._wait_for_cards(page)
         jobs.extend(await self.parse_page(page, occ, seen_urls))
 
         if _MAX_PAGES <= 1:
             return jobs
 
-        # --- Pages 2 .. _MAX_PAGES ---
         for page_num in range(2, _MAX_PAGES + 1):
-            # FIX 1: keep locator and .first separate so count() is meaningful.
             nav_locator = page.locator(f'ul.pagingLink a:has-text("{page_num}")')
             if await nav_locator.count() == 0:
                 logger.debug("No pagination link for page %d — stopping", page_num)
@@ -148,7 +114,6 @@ class Mynavi2027Scraper(BaseScraper):
             logger.debug("Mynavi2027 occ=%s → page %d", occ, page_num)
             await nav_locator.first.click()
             await page.wait_for_load_state("domcontentloaded", timeout=_NAV_TIMEOUT)
-            # FIX 3: wait for cards after every navigation, not just page 1.
             await self._wait_for_cards(page)
 
             page_jobs = await self.parse_page(page, occ, seen_urls)
@@ -163,13 +128,7 @@ class Mynavi2027Scraper(BaseScraper):
     # ------------------------------------------------------------------
 
     async def _wait_for_cards(self, page: Page) -> None:
-        """Wait until job cards are attached to the DOM, then let JS settle.
-
-        Used after every navigation (page 1 GET and subsequent pagination
-        clicks) to avoid calling ``parse_page`` on a partially-rendered DOM.
-        """
         await page.wait_for_selector(_CARD_SELECTOR, state="attached", timeout=10_000)
-        # FIX 2: single consolidated delay — no double-wait anymore.
         await page.wait_for_timeout(_RENDER_DELAY_MS)
 
     # ------------------------------------------------------------------
@@ -205,21 +164,18 @@ class Mynavi2027Scraper(BaseScraper):
 
                         const company = link.textContent.trim();
 
-                        // Card resolution for location extraction
-                        const card = link.closest('li')
+                        // Ищем родительский элемент карточки
+                        const card = link.closest('.boxSearchbox') 
+                                  || link.closest('li')
                                   || link.closest('[class*="corp"]')
                                   || link.closest('[class*="company"]');
 
-                        // Title = occupation label.
-                        // This page lists COMPANIES that hire for the
-                        // occupation, not individual job posts.  There is
-                        // no per-card job title — the first <p> contains
-                        // industry tags (業種), not role names.  Using the
-                        // occupation label is the correct semantic choice
-                        // and guarantees is_target_job() passes.
-                        const title = occLabel;
+                        // Достаем весь текст карточки, убираем лишние пробелы и переносы
+                        const cardText = card ? card.innerText.replace(/\\s+/g, ' ').trim() : '';
+                        
+                        // Формируем честный title: Название компании + кусок описания из карточки
+                        const title = company + " | " + cardText.substring(0, 400);
 
-                        const cardText = card ? card.textContent : '';
                         const location = /東京/.test(cardText) ? 'Tokyo' : 'Japan';
 
                         const url = href.startsWith('http')
@@ -245,21 +201,21 @@ class Mynavi2027Scraper(BaseScraper):
             try:
                 url = str(item["url"])
 
-                # FIX 5: skip URLs already collected from an earlier occ.
                 if url in seen_urls:
-                    logger.debug("Dedup skip (cross-occ): %s", url)
                     continue
                 seen_urls.add(url)
 
-                # FIX 4: is_target_job now receives the real card title,
-                # not the hardcoded occupation label.
-                title = str(item["title"])[:500]
+                # Теперь наш жесткий фильтр проверяет реальный текст карточки!
+                title = str(item["title"])
                 if not self.is_target_job(title):
-                    logger.debug("Skipping non-target: %s", title)
+                    logger.debug("Skipping non-target (failed strict filter): %s", str(item["company"]))
                     continue
 
+                # Для сохранения в БД оставляем аккуратное название (Компания + Категория)
+                clean_title = f"{str(item['company'])[:100]} ({occ_label})"
+
                 cards.append(JobPosting(
-                    title=title,
+                    title=clean_title,
                     company=str(item["company"])[:250],
                     url=url,  # type: ignore[arg-type]
                     location=str(item["location"])[:250],

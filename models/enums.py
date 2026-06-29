@@ -20,23 +20,8 @@ class SourcePlatform(StrEnum):
     representation naturally -- no ``.value`` needed in most contexts.
     """
 
-    DUMMY = "dummy"
-    """Mock platform used for testing and demonstration."""
-
-    MYNAVI = "mynavi"
-    """Mynavi Tenshoku (マイナビ転職) -- Japanese job board."""
-
     WANTEDLY = "wantedly"
     """Wantedly -- startup/tech job platform popular in Japan."""
-
-    GREEN = "green"
-    """Green (green-japan.com) -- IT/Web/Design job platform."""
-
-    GAIJINPOT = "gaijinpot"
-    """GaijinPot Jobs -- platform for foreigners seeking work in Japan."""
-
-    INDEED = "indeed"
-    """Indeed Japan (jp.indeed.com) -- the largest job search engine."""
 
     MYNAVI_2027 = "mynavi_2027"
     """Mynavi 2027 新卒 (job.mynavi.jp) -- new graduate recruitment."""

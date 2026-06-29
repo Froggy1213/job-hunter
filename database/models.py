@@ -6,7 +6,7 @@ two, so application code never touches ORM objects directly.
 
 The ``url`` column has a unique constraint and index -- this is the
 deduplication key.  ``source_platform`` is also indexed for filtered
-queries (``/jobs dummy``).
+queries (``/jobs wantedly``).
 """
 
 from __future__ import annotations

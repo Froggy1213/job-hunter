@@ -2,6 +2,12 @@
 
 Async Telegram bot that aggregates job listings (design jobs in Tokyo) from Japanese job boards.
 
+## Features
+
+- **Asynchronous Scraping**: Efficiently scrapes multiple job boards concurrently.
+- **Modular Architecture**: Built with clean architecture principles using Strategy and Repository patterns.
+- **Easy Extensibility**: Simple process to add new job board sources.
+
 ## Architecture
 
 ```

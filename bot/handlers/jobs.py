@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     CallbackQuery,
@@ -96,29 +97,27 @@ async def _show_page(
         source: Optional platform filter.
         edit: If True, edit *msg* in-place; otherwise send a new message.
     """
-    # Fetch.
-    if source is not None:
-        all_jobs = await container.repository.get_by_source(source)
-    else:
-        all_jobs = await container.repository.get_all()
-
-    total_pages = max(1, (len(all_jobs) + _JOBS_PER_PAGE - 1) // _JOBS_PER_PAGE)
+    # Fetch with server-side pagination.
+    total = await container.repository.count_jobs(source)
+    total_pages = max(1, (total + _JOBS_PER_PAGE - 1) // _JOBS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
 
-    start = page * _JOBS_PER_PAGE
-    page_jobs = all_jobs[start:start + _JOBS_PER_PAGE]
+    offset = page * _JOBS_PER_PAGE
+    page_jobs = await container.repository.get_jobs_page(
+        limit=_JOBS_PER_PAGE, offset=offset, source=source,
+    )
 
     # Build text.
     source_label = f"<code>{source.value}</code>" if source else "all"
     lines = [
-        f"<b>📋 Jobs ({len(all_jobs)} total, {source_label})</b>",
+        f"<b>📋 Jobs ({total} total, {source_label})</b>",
         f"Page {page + 1}/{total_pages}\n",
     ]
 
     if not page_jobs:
         lines.append("No jobs found. They will appear after the next scrape.")
     else:
-        for i, job in enumerate(page_jobs, start=start + 1):
+        for i, job in enumerate(page_jobs, start=offset + 1):
             lines.append(job_card(job, i))
 
     text = "\n".join(lines)
@@ -127,9 +126,24 @@ async def _show_page(
     keyboard = _build_nav_keyboard(page, total_pages, source)
 
     if edit:
-        await msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+        try:
+            await msg.edit_text(
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except TelegramBadRequest:
+            # Identical content or other non-critical edit failure —
+            # just acknowledge the callback silently.
+            logger.debug("Edit_text no-op (content unchanged)", exc_info=True)
     else:
-        await msg.answer(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+        await msg.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -211,4 +225,7 @@ async def cmd_scrape(message: Message, container: Container) -> None:
     else:
         text = "✅ Scrape complete! No new jobs found."
 
-    await status_msg.edit_text(text, parse_mode="HTML")
+    try:
+        await status_msg.edit_text(text, parse_mode="HTML")
+    except TelegramBadRequest:
+        logger.debug("Scrape status edit_text no-op", exc_info=True)

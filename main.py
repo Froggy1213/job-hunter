@@ -49,6 +49,7 @@ from database.sqlalchemy_repository import SQLAlchemyJobRepository, SQLAlchemySu
 from scrapers.implementations.mynavi2027 import Mynavi2027Scraper
 from scrapers.implementations.wantedly import WantedlyScraper
 from scrapers.orchestrator import ScraperOrchestrator
+from services.notifier import ScrapeNotifierService
 
 logger = logging.getLogger("job_hunter")
 
@@ -93,8 +94,8 @@ async def main() -> None:
 
     # ---- 4. Scrapers (Strategy pattern -- add new boards here) ----
     scrapers = [
-        Mynavi2027Scraper(headless=settings.playwright_headless),
-        WantedlyScraper(headless=settings.playwright_headless),
+        Mynavi2027Scraper(headless=settings.playwright_headless, timeout_ms=settings.playwright_timeout_ms),
+        WantedlyScraper(headless=settings.playwright_headless, timeout_ms=settings.playwright_timeout_ms),
     ]
     orchestrator = ScraperOrchestrator(scrapers, repository)
     logger.info(
@@ -126,95 +127,16 @@ async def main() -> None:
     dp.include_router(jobs_handler.router)
 
     # ---- 7. Scheduled scraping ----
+    notifier = ScrapeNotifierService(
+        orchestrator=orchestrator,
+        bot=bot,
+        subscriber_repo=subscriber_repo,
+        admin_chat_id=settings.admin_chat_id,
+    )
+
     scheduler = AsyncIOScheduler()
-
-    def _format_broadcast_card(job) -> str:
-        """Format a job posting for broadcast (no index number)."""
-        from html import escape as _esc
-
-        title = _esc(job.title)
-        company = _esc(job.company)
-        location = _esc(job.location)
-        salary = _esc(job.salary or "—")
-        url = _esc(str(job.url))
-        source = _esc(job.source_platform.value)
-
-        return (
-            f"<b><a href=\"{url}\">{title}</a></b>\n"
-            f"🏢 {company}\n"
-            f"📍 {location}  |  💰 {salary}\n"
-            f"📡 <code>{source}</code>"
-        )
-
-    async def run_scheduled_scrape() -> None:
-        """Execute all scrapers and notify subscribers about new jobs.
-
-        Defined as a closure so it has access to ``orchestrator``,
-        ``bot``, ``subscriber_repo``, and ``settings`` without threading
-        them through globals or the DI container.  APScheduler calls this
-        on a timer.
-        """
-        logger.info("Scheduled scrape triggered")
-        try:
-            result = await orchestrator.run_all()
-        except Exception:
-            logger.exception("Scheduled scrape failed")
-            return
-
-        total_new = sum(result.counts.values())
-        if total_new > 0:
-            # ---- Admin summary ----
-            platform_lines = [
-                f"  • <code>{platform.value}</code>: {count} new"
-                for platform, count in result.counts.items()
-                if count > 0
-            ]
-            summary = "\n".join(platform_lines)
-
-            await bot.send_message(
-                chat_id=settings.admin_chat_id,
-                text=(
-                    f"<b>🔔 Scrape complete!</b>\n"
-                    f"Found <b>{total_new}</b> new job listing(s):\n"
-                    f"{summary}\n\n"
-                    f"Use /jobs to view them."
-                ),
-                parse_mode="HTML",
-            )
-
-            # ---- Broadcast new jobs to subscribers ----
-            subscribers = await subscriber_repo.get_all_subscribers()
-            if subscribers and result.new_jobs:
-                logger.info(
-                    "Broadcasting new jobs to subscribers",
-                    extra={"subscribers": len(subscribers), "jobs": len(result.new_jobs)},
-                )
-                for job in result.new_jobs:
-                    card_no_index = _format_broadcast_card(job)
-                    for chat_id in subscribers:
-                        try:
-                            await bot.send_message(
-                                chat_id=chat_id,
-                                text=f"<b>🆕 New Job!</b>\n{card_no_index}",
-                                parse_mode="HTML",
-                            )
-                            await asyncio.sleep(0.05)  # 20 msg/s rate limit safety
-                        except Exception:
-                            logger.debug(
-                                "Failed to notify subscriber",
-                                extra={"chat_id": chat_id},
-                                exc_info=True,
-                            )
-
-            logger.info(
-                "Scheduled scrape notification sent",
-                extra={"new_jobs": total_new, "subscribers_notified": len(subscribers)},
-            )
-        else:
-            logger.info("Scheduled scrape found no new jobs")
-
     scheduler.add_job(
-        run_scheduled_scrape,
+        notifier.run_scrape_and_notify,
         trigger=IntervalTrigger(hours=4),
         id="scheduled_scrape",
         name="Periodic job board scrape",

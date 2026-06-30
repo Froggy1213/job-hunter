@@ -65,9 +65,9 @@ class ScraperOrchestrator:
         scrapers are caught, logged, and do NOT propagate -- a failing
         scraper never blocks the others.
 
-        Deduplication: a job posting is only persisted if its URL does
-        not already exist in the repository.  This is checked per-item
-        so scrapers can be re-run safely at any interval.
+        Deduplication: a single bulk query checks which scraped URLs
+        already exist in the repository before persisting.  This avoids
+        the N+1 problem of checking URLs one-by-one in a loop.
 
         Returns:
             A ``ScrapeResult`` with counts of new jobs per platform and
@@ -88,7 +88,9 @@ class ScraperOrchestrator:
         for scraper, result in zip(self._scrapers, results):
             if isinstance(result, Exception):
                 logger.error(
-                    "Scraper failed",
+                    "Scraper failed: %s — %s",
+                    scraper.platform.value,
+                    result,
                     extra={
                         "platform": scraper.platform.value,
                         "error": str(result),
@@ -107,6 +109,9 @@ class ScraperOrchestrator:
     async def _run_one(self, scraper: BaseScraper) -> tuple[int, list[JobPosting]]:
         """Execute a single scraper, deduplicate, and persist.
 
+        Uses a single bulk query to check existing URLs instead of one
+        ``exists()`` call per job (fixes the N+1 problem).
+
         Returns a tuple of (count of new jobs, list of new JobPosting objects).
         """
         jobs = await scraper.fetch_jobs()
@@ -115,11 +120,15 @@ class ScraperOrchestrator:
             extra={"platform": scraper.platform.value, "count": len(jobs)},
         )
 
+        # Bulk check: one DB round-trip instead of N.
+        urls = [str(job.url) for job in jobs]
+        existing_urls = await self._repository.get_existing_urls(urls)
+
         new_count = 0
         new_jobs: list[JobPosting] = []
         for job in jobs:
             url_str = str(job.url)
-            if await self._repository.exists(url_str):
+            if url_str in existing_urls:
                 logger.debug("Skipping duplicate", extra={"url": url_str})
                 continue
 

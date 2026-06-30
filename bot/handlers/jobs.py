@@ -96,22 +96,20 @@ async def _show_page(
         source: Optional platform filter.
         edit: If True, edit *msg* in-place; otherwise send a new message.
     """
-    # Fetch.
-    if source is not None:
-        all_jobs = await container.repository.get_by_source(source)
-    else:
-        all_jobs = await container.repository.get_all()
-
-    total_pages = max(1, (len(all_jobs) + _JOBS_PER_PAGE - 1) // _JOBS_PER_PAGE)
+    # Fetch with server-side pagination.
+    total = await container.repository.count_jobs(source)
+    total_pages = max(1, (total + _JOBS_PER_PAGE - 1) // _JOBS_PER_PAGE)
     page = max(0, min(page, total_pages - 1))
 
-    start = page * _JOBS_PER_PAGE
-    page_jobs = all_jobs[start:start + _JOBS_PER_PAGE]
+    offset = page * _JOBS_PER_PAGE
+    page_jobs = await container.repository.get_jobs_page(
+        limit=_JOBS_PER_PAGE, offset=offset, source=source,
+    )
 
     # Build text.
     source_label = f"<code>{source.value}</code>" if source else "all"
     lines = [
-        f"<b>📋 Jobs ({len(all_jobs)} total, {source_label})</b>",
+        f"<b>📋 Jobs ({total} total, {source_label})</b>",
         f"Page {page + 1}/{total_pages}\n",
     ]
 

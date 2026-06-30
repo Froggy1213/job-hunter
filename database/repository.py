@@ -74,3 +74,47 @@ class JobRepository(ABC):
             ordered by ``scraped_at`` descending.  May be empty.
         """
         ...
+
+    @abstractmethod
+    async def get_jobs_page(
+        self,
+        limit: int,
+        offset: int,
+        source: SourcePlatform | None = None,
+    ) -> list[JobPosting]:
+        """Retrieve a page of job postings.
+
+        Args:
+            limit: Maximum number of jobs to return.
+            offset: Number of jobs to skip.
+            source: Optional platform filter.  ``None`` means all platforms.
+
+        Returns:
+            A list of ``JobPosting`` domain models ordered by
+            ``scraped_at`` descending.
+        """
+        ...
+
+    @abstractmethod
+    async def count_jobs(self, source: SourcePlatform | None = None) -> int:
+        """Count persisted job postings.
+
+        Args:
+            source: Optional platform filter.  ``None`` means all platforms.
+
+        Returns:
+            The total number of matching job postings.
+        """
+        ...
+
+    @abstractmethod
+    async def get_existing_urls(self, urls: list[str]) -> set[str]:
+        """Check which of the given URLs already exist in the store.
+
+        Args:
+            urls: A list of URL strings to check.
+
+        Returns:
+            The subset of *urls* that are already persisted.  May be empty.
+        """
+        ...

@@ -47,3 +47,8 @@ class Settings(BaseSettings):
         validation_alias="ADMIN_CHAT_ID",
         description="Telegram chat ID where scheduled scrape alerts are sent.",
     )
+    playwright_timeout_ms: int = Field(
+        default=30000,
+        validation_alias="PLAYWRIGHT_TIMEOUT_MS",
+        description="Playwright page navigation timeout in milliseconds.",
+    )

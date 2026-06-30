@@ -51,15 +51,17 @@ class BaseScraper(ABC):
         "Chrome/131.0.0.0 Safari/537.36"
     )
 
-    def __init__(self, headless: bool = True) -> None:
+    def __init__(self, headless: bool = True, timeout_ms: int = 30_000) -> None:
         """Initialise the scraper.
 
         Args:
             headless: Whether to launch the browser in headless mode.
                 Set to ``False`` during development to see what Playwright
                 is doing.
+            timeout_ms: Page navigation timeout in milliseconds.
         """
         self._headless = headless
+        self._timeout_ms = timeout_ms
 
     # ------------------------------------------------------------------
     # Job title filter (shared across all scrapers)
@@ -183,7 +185,7 @@ class BaseScraper(ABC):
                 )
                 page = await context.new_page()
                 logger.info("Navigating", extra={"url": url})
-                await page.goto(url, wait_until="networkidle", timeout=30_000)
+                await page.goto(url, wait_until="networkidle", timeout=self._timeout_ms)
                 return await self.parse_page(page)
             except Exception as exc:
                 raise ScraperError(

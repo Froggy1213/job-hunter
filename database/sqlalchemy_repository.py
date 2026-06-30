@@ -94,6 +94,51 @@ class SQLAlchemyJobRepository(JobRepository):
                 f"Failed to fetch jobs for source '{platform}': {exc}"
             ) from exc
 
+    async def get_jobs_page(
+        self,
+        limit: int,
+        offset: int,
+        source: SourcePlatform | None = None,
+    ) -> list[JobPosting]:
+        """Return a page of jobs, newest first, with optional source filter."""
+        try:
+            async with self._session_factory() as session:
+                stmt = select(JobModel).order_by(JobModel.scraped_at.desc())
+                if source is not None:
+                    stmt = stmt.where(JobModel.source_platform == source)
+                stmt = stmt.limit(limit).offset(offset)
+                result = await session.execute(stmt)
+                return [self._model_to_domain(row) for row in result.scalars().all()]
+        except Exception as exc:
+            raise RepositoryError(f"Failed to fetch jobs page: {exc}") from exc
+
+    async def count_jobs(self, source: SourcePlatform | None = None) -> int:
+        """Count jobs, with optional source filter."""
+        try:
+            async with self._session_factory() as session:
+                from sqlalchemy import func
+
+                stmt = select(func.count(JobModel.id))
+                if source is not None:
+                    stmt = stmt.where(JobModel.source_platform == source)
+                result = await session.execute(stmt)
+                return result.scalar_one()
+        except Exception as exc:
+            raise RepositoryError(f"Failed to count jobs: {exc}") from exc
+
+    async def get_existing_urls(self, urls: list[str]) -> set[str]:
+        """Return the subset of *urls* that already exist in the store."""
+        if not urls:
+            return set()
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(
+                    select(JobModel.url).where(JobModel.url.in_(urls))
+                )
+                return {row for row in result.scalars().all()}
+        except Exception as exc:
+            raise RepositoryError(f"Failed to check existing URLs: {exc}") from exc
+
     # ------------------------------------------------------------------
     # Model ↔ Domain mappers
     # ------------------------------------------------------------------

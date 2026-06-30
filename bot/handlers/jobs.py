@@ -117,7 +117,7 @@ async def _show_page(
     if not page_jobs:
         lines.append("No jobs found. They will appear after the next scrape.")
     else:
-        for i, job in enumerate(page_jobs, start=start + 1):
+        for i, job in enumerate(page_jobs, start=offset + 1):
             lines.append(job_card(job, i))
 
     text = "\n".join(lines)

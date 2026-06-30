@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, CommandObject
 from aiogram.types import (
     CallbackQuery,
@@ -125,9 +126,24 @@ async def _show_page(
     keyboard = _build_nav_keyboard(page, total_pages, source)
 
     if edit:
-        await msg.edit_text(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+        try:
+            await msg.edit_text(
+                text,
+                reply_markup=keyboard,
+                parse_mode="HTML",
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
+            )
+        except TelegramBadRequest:
+            # Identical content or other non-critical edit failure —
+            # just acknowledge the callback silently.
+            logger.debug("Edit_text no-op (content unchanged)", exc_info=True)
     else:
-        await msg.answer(text, reply_markup=keyboard, parse_mode="HTML", link_preview_options=LinkPreviewOptions(is_disabled=True))
+        await msg.answer(
+            text,
+            reply_markup=keyboard,
+            parse_mode="HTML",
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -209,4 +225,7 @@ async def cmd_scrape(message: Message, container: Container) -> None:
     else:
         text = "✅ Scrape complete! No new jobs found."
 
-    await status_msg.edit_text(text, parse_mode="HTML")
+    try:
+        await status_msg.edit_text(text, parse_mode="HTML")
+    except TelegramBadRequest:
+        logger.debug("Scrape status edit_text no-op", exc_info=True)

@@ -88,7 +88,9 @@ class ScraperOrchestrator:
         for scraper, result in zip(self._scrapers, results):
             if isinstance(result, Exception):
                 logger.error(
-                    "Scraper failed",
+                    "Scraper failed: %s — %s",
+                    scraper.platform.value,
+                    result,
                     extra={
                         "platform": scraper.platform.value,
                         "error": str(result),

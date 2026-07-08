@@ -11,9 +11,29 @@ adapter (``SQLAlchemyJobRepository``) is wired in at startup.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from urllib.parse import urlparse, urlunparse
 
 from models.enums import SourcePlatform
 from models.job_posting import JobPosting
+
+
+def normalize_url(url: str) -> str:
+    """Normalize a URL for deduplication.
+
+    Strips trailing slashes, lowercases the scheme and host, and
+    removes query strings / fragments so that cosmetically different
+    URLs pointing to the same page are treated as identical.
+    """
+    parsed = urlparse(url)
+    path = parsed.path.rstrip("/") or "/"
+    return urlunparse((
+        parsed.scheme.lower(),
+        parsed.netloc.lower(),
+        path,
+        "",  # params
+        "",  # query — intentionally stripped for dedup
+        "",  # fragment
+    ))
 
 
 class JobRepository(ABC):
@@ -116,5 +136,20 @@ class JobRepository(ABC):
 
         Returns:
             The subset of *urls* that are already persisted.  May be empty.
+        """
+        ...
+
+    @abstractmethod
+    async def save_many(self, jobs: list[JobPosting]) -> list[JobPosting]:
+        """Persist multiple job postings in a single transaction.
+
+        Args:
+            jobs: The validated ``JobPosting`` objects to persist.
+
+        Returns:
+            The saved ``JobPosting`` objects.
+
+        Raises:
+            RepositoryError: If the database operation fails.
         """
         ...

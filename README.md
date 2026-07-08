@@ -63,8 +63,12 @@ No other files need to change.
 | Command | Description |
 |---------|-------------|
 | `/start` | Welcome message and command list |
-| `/jobs` | List all scraped jobs |
-| `/jobs <source>` | Filter by source (e.g. `/jobs dummy`) |
+| `/jobs` | List all scraped jobs (paginated) |
+| `/jobs <source>` | Filter by platform (e.g. `/jobs wantedly`) |
+| `/stats` | Job counts by platform |
+| `/subscribe` | Get notified about new jobs |
+| `/unsubscribe` | Stop notifications |
+| `/scrape` | Manually trigger scrape (admin only) |
 
 ## Testing
 

@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import re
 
 from playwright.async_api import Page, async_playwright
+from playwright_stealth import Stealth
 
 from models.enums import SourcePlatform
 from models.job_posting import JobPosting
@@ -48,7 +48,7 @@ class WantedlyScraper(BaseScraper):
     _user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/124.0.0.0 Safari/537.36"
+        "Chrome/137.0.0.0 Safari/537.36"
     )
 
     @property
@@ -69,6 +69,7 @@ class WantedlyScraper(BaseScraper):
                     viewport={"width": 1280, "height": 900},
                 )
                 page = await context.new_page()
+                await Stealth().apply_stealth_async(page)
 
                 for page_num in range(1, _MAX_PAGES + 1):
                     url = self._build_page_url(page_num)
@@ -84,8 +85,7 @@ class WantedlyScraper(BaseScraper):
                         await page.evaluate("window.scrollBy(0, 600)")
                         await page.wait_for_timeout(1_500)
                         await page.evaluate("window.scrollBy(0, 600)")
-                        await page.wait_for_timeout(2_500)
-                        await page.wait_for_timeout(800)
+                        await page.wait_for_timeout(3_300)
 
                         jobs = await self.parse_page(page)
                         all_jobs.extend(jobs)

@@ -67,9 +67,15 @@ async def on_jobs_page(callback: CallbackQuery, container: Container) -> None:
     - ``page``: 0-based page index
     - ``source``: ``"all"`` or a SourcePlatform value
     """
+    if not callback.data:
+        return
+
     _, page_str, source_str = callback.data.split(":", 2)
     page = int(page_str)
     source = None if source_str == "all" else SourcePlatform(source_str)
+
+    if not isinstance(callback.message, Message):
+        return
 
     await _show_page(callback.message, container, page=page, source=source, edit=True)
     await callback.answer()

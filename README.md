@@ -83,6 +83,25 @@ nationwide board scraped by occupation code — it ignores `--location` and
 only best-effort-filters arbitrary keywords, so use `--source wantedly` for
 general searches.
 
+### Ingest mode (Indeed & other browser-fetched listings)
+
+Indeed Japan is behind Cloudflare and can't be scraped headless (the old bot
+got banned; direct requests return 403). But a **real browser passes the
+Cloudflare check** and serves full listings. So Indeed has **no scraper** —
+instead an agent (the Hermes `japan-job-search` skill) drives a real browser,
+extracts the cards, and pipes them into the **same** dedup / DB / new-flagging
+pipeline via `--ingest`:
+
+```bash
+echo '[{"title":"Backend Engineer","company":"Acme","url":"https://jp.indeed.com/viewjob?jk=abc123","location":"Tokyo"}]' \
+  | uv run python search_cli.py --ingest --json
+```
+
+Records are JSON (a list, or `{"jobs": [...]}`); each needs `title` + `url`
+(`company`, `location`, `salary`, `source_platform` optional — source
+defaults to `indeed`). Because Indeed's id lives in the `?jk=` query,
+`normalize_url` preserves query strings so listings don't collapse.
+
 ## Adding a new job board
 
 1. Add the platform to `models/enums.py` → `SourcePlatform`

@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from urllib.parse import urlencode
 
 from playwright.async_api import Page, async_playwright
 from playwright_stealth import Stealth
@@ -44,6 +45,10 @@ _SELECTOR_TIMEOUT = 12_000
 
 class WantedlyScraper(BaseScraper):
     """Scrape design/creative projects in Tokyo from Wantedly."""
+
+    # Wantedly supports free-text search via the ``q=`` URL param, so a
+    # custom keyword is filtered server-side — see ``matches``.
+    _url_encodes_keyword: bool = True
 
     _user_agent: str = (
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -211,8 +216,8 @@ class WantedlyScraper(BaseScraper):
         for item in raw_items:
             try:
                 title = str(item["title"])[:500]
-                if not self.is_target_job(title):
-                    logger.debug("Skipping non-target Wantedly job: %s", title)
+                if not self.matches(title):
+                    logger.debug("Skipping non-matching Wantedly job: %s", title)
                     continue
                 cards.append(JobPosting(
                     title=title,
@@ -227,9 +232,22 @@ class WantedlyScraper(BaseScraper):
 
         return cards
 
-    @staticmethod
-    def _build_page_url(page_num: int) -> str:
-        return (
-            f"{_BASE_URL}/projects?type=mixed&page={page_num}"
-            f"&occupations={_DESIGN_OCCUPATIONS}&locations=tokyo"
-        )
+    def _build_page_url(self, page_num: int) -> str:
+        """Build a Wantedly search URL for *page_num*.
+
+        With a custom ``keyword`` → free-text search (``q=``).  Without a
+        keyword → the default design occupations.  ``location`` maps to
+        Wantedly's ``locations`` slug (default ``tokyo``; ``any``/``all``
+        omits the location filter entirely).
+        """
+        params: dict[str, str | int] = {"type": "mixed", "page": page_num}
+        if self._keyword:
+            params["q"] = self._keyword
+        else:
+            params["occupations"] = _DESIGN_OCCUPATIONS
+
+        loc = self._location or "tokyo"
+        if loc.lower() not in {"any", "all"}:
+            params["locations"] = loc
+
+        return f"{_BASE_URL}/projects?{urlencode(params)}"

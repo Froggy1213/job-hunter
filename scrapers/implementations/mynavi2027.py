@@ -212,10 +212,12 @@ class Mynavi2027Scraper(BaseScraper):
                     continue
                 seen_urls.add(url)
 
-                # Title filter checks the full card text for relevance
+                # Title filter checks the full card text for relevance.
+                # ``matches`` honours a custom --keyword when one was given,
+                # otherwise falls back to the built-in design filter.
                 title = str(item["title"])
-                if not self.is_target_job(title):
-                    logger.debug("Skipping non-target (failed strict filter): %s", str(item["company"]))
+                if not self.matches(title):
+                    logger.debug("Skipping non-matching card: %s", str(item["company"]))
                     continue
 
                 # Store a clean title: Company (Occupation Category)

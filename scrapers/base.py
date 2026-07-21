@@ -57,7 +57,13 @@ class BaseScraper(ABC):
         "Chrome/137.0.0.0 Safari/537.36"
     )
 
-    def __init__(self, headless: bool = True, timeout_ms: int = 30_000) -> None:
+    def __init__(
+        self,
+        headless: bool = True,
+        timeout_ms: int = 30_000,
+        keyword: str | None = None,
+        location: str | None = None,
+    ) -> None:
         """Initialise the scraper.
 
         Args:
@@ -65,9 +71,20 @@ class BaseScraper(ABC):
                 Set to ``False`` during development to see what Playwright
                 is doing.
             timeout_ms: Page navigation timeout in milliseconds.
+            keyword: Optional free-text search query.  When ``None`` the
+                scraper uses its built-in design-job defaults and the
+                static ``is_target_job`` filter.  When set, the scraper
+                searches for this query and ``matches`` filters by its
+                tokens instead of the design word-list.
+            location: Optional location override (site-specific slug, e.g.
+                ``"tokyo"``).  ``None`` means the scraper's default;
+                ``"any"``/``"all"`` disables location filtering where the
+                board supports it.
         """
         self._headless = headless
         self._timeout_ms = timeout_ms
+        self._keyword = keyword.strip() if keyword and keyword.strip() else None
+        self._location = location.strip() if location and location.strip() else None
 
     # ------------------------------------------------------------------
     # Job title filter (shared across all scrapers)
@@ -107,6 +124,37 @@ class BaseScraper(ABC):
                 return True
 
         return False
+
+    # Whether a custom keyword is encoded into this board's search URL.
+    # When ``True`` the site filters server-side and ``matches`` trusts
+    # that result; when ``False`` ``matches`` applies a best-effort
+    # client-side token filter on the title.  Boards with URL keyword
+    # search override this to ``True``.
+    _url_encodes_keyword: bool = False
+
+    def matches(self, title: str) -> bool:
+        """Return ``True`` if *title* should be kept for this scrape.
+
+        Three modes:
+
+        - **No keyword:** delegate to the built-in design-job filter
+          ``is_target_job`` — preserves the original behaviour.
+        - **Keyword encoded in the search URL** (``_url_encodes_keyword``):
+          the board already searched server-side, so trust it and accept
+          every card.  Crucial for cross-language queries — an English
+          ``engineer`` query returns Japanese ``エンジニア`` titles that a
+          literal substring match would wrongly reject.
+        - **Keyword NOT in the URL:** best-effort — accept titles
+          containing any whitespace-separated token of the keyword
+          (case-insensitive).  The design stop-word list is not applied.
+        """
+        if self._keyword is None:
+            return self.is_target_job(title)
+        if self._url_encodes_keyword:
+            return True
+        lower = title.lower()
+        tokens = [t for t in self._keyword.lower().split() if t]
+        return any(token in lower for token in tokens)
 
     # ------------------------------------------------------------------
     # Subclass contract

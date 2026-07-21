@@ -25,3 +25,11 @@ class SourcePlatform(StrEnum):
 
     MYNAVI_2027 = "mynavi_2027"
     """Mynavi 2027 新卒 (job.mynavi.jp) -- new graduate recruitment."""
+
+    INDEED = "indeed"
+    """Indeed Japan (jp.indeed.com) -- aggregator behind Cloudflare.
+
+    There is no local scraper for this platform: Indeed blocks direct
+    scraping, so listings are fetched by the Hermes agent (``web_extract``)
+    and fed into the pipeline via ``search_cli.py --ingest``.
+    """

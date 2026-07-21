@@ -20,14 +20,9 @@ from models.job_posting import JobPosting
 def normalize_url(url: str) -> str:
     """Normalize a URL for deduplication.
 
-    Strips trailing slashes and the fragment, and lowercases the scheme
-    and host, so cosmetically different URLs pointing to the same page
-    are treated as identical.
-
-    The **query string is preserved**: some boards (notably Indeed, whose
-    job id lives in ``?jk=<id>``) identify a listing by a query param.
-    Boards whose id is in the path (Wantedly, Mynavi) already drop the
-    query in their scrapers, so keeping it here is a no-op for them.
+    Strips trailing slashes, lowercases the scheme and host, and
+    removes query strings / fragments so that cosmetically different
+    URLs pointing to the same page are treated as identical.
     """
     parsed = urlparse(url)
     path = parsed.path.rstrip("/") or "/"
@@ -36,8 +31,8 @@ def normalize_url(url: str) -> str:
         parsed.netloc.lower(),
         path,
         "",  # params
-        parsed.query,  # kept — identifies id-in-query listings (Indeed)
-        "",  # fragment — always dropped
+        "",  # query — intentionally stripped for dedup
+        "",  # fragment
     ))
 
 

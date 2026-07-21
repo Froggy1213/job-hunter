@@ -38,7 +38,6 @@ from database.engine import create_engine_and_session
 from database.models import Base
 from database.repository import normalize_url
 from database.sqlalchemy_repository import SQLAlchemyJobRepository
-from models.enums import SourcePlatform
 from models.job_posting import JobPosting
 from scrapers.base import BaseScraper
 from scrapers.implementations.mynavi2027 import Mynavi2027Scraper
@@ -111,137 +110,47 @@ async def _fetch_all(
 
 
 async def run(args: argparse.Namespace) -> int:
-    """Gather jobs (scrape or ingest), dedup, persist, and print.
+    """Scrape, deduplicate, persist, and print. Returns a process exit code."""
+    scrapers = _build_scrapers(
+        args.sources, args.keyword, args.location, not args.headful, args.timeout_ms
+    )
 
-    Returns a process exit code.
-    """
     engine, session_factory = create_engine_and_session(args.db)
     try:
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
         repo = SQLAlchemyJobRepository(session_factory)
 
-        if args.ingest:
-            jobs, errors = _read_ingest_jobs(args)
-            sources = sorted({job.source_platform.value for job in jobs}) or [
-                args.ingest_source
-            ]
-        else:
-            scrapers = _build_scrapers(
-                args.sources, args.keyword, args.location, not args.headful, args.timeout_ms
-            )
-            jobs, errors = await _fetch_all(scrapers)
-            sources = args.sources
+        jobs, errors = await _fetch_all(scrapers)
 
-        return await _process_and_report(repo, jobs, args, errors, sources)
+        # Deduplicate within this run by normalized URL (keep first seen).
+        seen: set[str] = set()
+        unique: list[tuple[JobPosting, str]] = []
+        for job in jobs:
+            norm = normalize_url(str(job.url))
+            if norm in seen:
+                continue
+            seen.add(norm)
+            unique.append((job, norm))
+
+        existing = await repo.get_existing_urls([norm for _, norm in unique])
+
+        enriched: list[tuple[JobPosting, bool]] = [
+            (job, norm not in existing) for job, norm in unique
+        ]
+        new_jobs = [job for job, is_new in enriched if is_new]
+
+        saved = 0
+        if new_jobs and not args.no_save:
+            await repo.save_many(new_jobs)
+            saved = len(new_jobs)
+
+        _print_results(args, enriched, errors=errors, saved=saved)
+
+        # Non-zero only when every scraper failed and nothing came back.
+        return 1 if errors and not unique else 0
     finally:
         await engine.dispose()
-
-
-async def _process_and_report(
-    repo: SQLAlchemyJobRepository,
-    jobs: list[JobPosting],
-    args: argparse.Namespace,
-    errors: dict[str, str],
-    sources: list[str],
-) -> int:
-    """Dedup within the run, mark new-since-last-run, persist, and print.
-
-    Shared by scrape mode and ``--ingest`` mode so both get identical
-    deduplication, new-flagging, persistence, and output.
-    """
-    # Deduplicate within this run by normalized URL (keep first seen).
-    seen: set[str] = set()
-    unique: list[tuple[JobPosting, str]] = []
-    for job in jobs:
-        norm = normalize_url(str(job.url))
-        if norm in seen:
-            continue
-        seen.add(norm)
-        unique.append((job, norm))
-
-    existing = await repo.get_existing_urls([norm for _, norm in unique])
-
-    enriched: list[tuple[JobPosting, bool]] = [
-        (job, norm not in existing) for job, norm in unique
-    ]
-    new_jobs = [job for job, is_new in enriched if is_new]
-
-    saved = 0
-    if new_jobs and not args.no_save:
-        await repo.save_many(new_jobs)
-        saved = len(new_jobs)
-
-    _print_results(args, enriched, errors=errors, saved=saved, sources=sources)
-
-    # Non-zero only when everything failed and nothing came back.
-    return 1 if errors and not unique else 0
-
-
-# ---------------------------------------------------------------------------
-# Ingest mode (agent-fetched listings, e.g. Indeed via web_extract)
-# ---------------------------------------------------------------------------
-
-
-def _resolve_platform(name: str) -> SourcePlatform:
-    """Map a source string to a ``SourcePlatform`` (raises on unknown)."""
-    key = str(name).strip().lower()
-    key = {"mynavi2027": "mynavi_2027"}.get(key, key)
-    return SourcePlatform(key)
-
-
-def _read_ingest_jobs(
-    args: argparse.Namespace,
-) -> tuple[list[JobPosting], dict[str, str]]:
-    """Read job records as JSON from stdin and validate them.
-
-    Accepts a JSON array of objects, or an object with a ``"jobs"`` array.
-    Each record needs ``title`` and ``url``; ``company``, ``location``,
-    ``salary`` and ``source_platform`` are optional (source defaults to
-    ``--ingest-source``). Invalid records are skipped with a warning.
-    """
-    if sys.stdin.isatty():
-        print(
-            "error: --ingest reads JSON from stdin; pipe records in, e.g. "
-            "echo '[{...}]' | ... --ingest",
-            file=sys.stderr,
-        )
-        return [], {"ingest": "no piped stdin"}
-    raw = sys.stdin.read()
-    try:
-        data = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        print(f"error: --ingest expects JSON on stdin: {exc}", file=sys.stderr)
-        return [], {"ingest": f"invalid JSON: {exc}"}
-
-    records = data.get("jobs") if isinstance(data, dict) else data
-    if not isinstance(records, list):
-        print('error: --ingest JSON must be a list or {"jobs": [...]}', file=sys.stderr)
-        return [], {"ingest": "expected a list of job records"}
-
-    jobs: list[JobPosting] = []
-    errors: dict[str, str] = {}
-    skipped = 0
-    for i, rec in enumerate(records):
-        try:
-            platform = _resolve_platform(rec.get("source_platform") or args.ingest_source)
-            jobs.append(
-                JobPosting(
-                    title=str(rec["title"]).strip(),
-                    company=str(rec.get("company") or "Unknown").strip(),
-                    url=rec["url"],
-                    location=str(rec.get("location") or "Japan").strip(),
-                    source_platform=platform,
-                    salary=(str(rec["salary"]).strip() if rec.get("salary") else None),
-                )
-            )
-        except Exception as exc:
-            skipped += 1
-            print(f"warning: skipped ingest record #{i}: {exc}", file=sys.stderr)
-
-    if skipped:
-        errors["ingest_skipped"] = f"{skipped} record(s) invalid"
-    return jobs, errors
 
 
 # ---------------------------------------------------------------------------
@@ -291,7 +200,6 @@ def _print_results(
     enriched: list[tuple[JobPosting, bool]],
     errors: dict[str, str],
     saved: int,
-    sources: list[str],
 ) -> None:
     by_platform = _counts_by_platform(enriched)
     total = len(enriched)
@@ -303,7 +211,7 @@ def _print_results(
             "query": {
                 "keyword": args.keyword,
                 "location": (args.location or "tokyo"),
-                "sources": sources,
+                "sources": args.sources,
             },
             "summary": {
                 "total": total,
@@ -321,7 +229,7 @@ def _print_results(
     # ---- Human-readable ----
     kw = args.keyword if args.keyword else "design roles (default)"
     print(f"Japan Job Search — keyword: {kw} · location: {args.location or 'tokyo'}")
-    print(f"Sources: {', '.join(sources)}")
+    print(f"Sources: {', '.join(args.sources)}")
     print()
 
     if not display:
@@ -425,19 +333,6 @@ def _build_parser() -> argparse.ArgumentParser:
         "--json",
         action="store_true",
         help="Emit a JSON object instead of human-readable text.",
-    )
-    parser.add_argument(
-        "--ingest",
-        action="store_true",
-        help="Skip scraping; read job records as JSON from stdin and run "
-        "them through the same dedup/save/new-flag pipeline. Used to feed "
-        "agent-fetched listings (e.g. Indeed via web_extract) into the DB.",
-    )
-    parser.add_argument(
-        "--ingest-source",
-        default="indeed",
-        help="Default source_platform for --ingest records lacking one "
-        "(default: indeed).",
     )
     parser.add_argument(
         "--headful",

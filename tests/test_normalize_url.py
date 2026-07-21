@@ -16,14 +16,13 @@ def test_lowercases_scheme_and_host_only():
 
 
 def test_queryless_urls_unchanged():
-    # Wantedly/Mynavi listings have no query — normalization is a no-op.
     url = "https://www.wantedly.com/projects/123"
     assert normalize_url(url) == url
 
 
-def test_query_preserved_for_indeed_style_ids():
-    # Indeed's job id lives in ?jk=; two different jk must NOT collapse.
-    a = normalize_url("https://jp.indeed.com/viewjob?jk=aaa111")
-    b = normalize_url("https://jp.indeed.com/viewjob?jk=bbb222")
-    assert a == "https://jp.indeed.com/viewjob?jk=aaa111"
-    assert a != b
+def test_strips_query_string():
+    # Query + fragment are dropped so cosmetic variants dedup together.
+    assert (
+        normalize_url("https://www.wantedly.com/projects/123?ref=feed&utm=x")
+        == "https://www.wantedly.com/projects/123"
+    )

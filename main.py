@@ -49,6 +49,7 @@ from database.models import Base
 from database.sqlalchemy_repository import SQLAlchemyJobRepository, SQLAlchemySubscriberRepository
 from scrapers.implementations.mynavi2027 import Mynavi2027Scraper
 from scrapers.implementations.wantedly import WantedlyScraper
+from scrapers.cli.linkedin import LinkedInScraper
 from scrapers.orchestrator import ScraperOrchestrator
 from services.notifier import ScrapeNotifierService
 
@@ -97,6 +98,7 @@ async def main() -> None:
     scrapers = [
         Mynavi2027Scraper(headless=settings.playwright_headless, timeout_ms=settings.playwright_timeout_ms),
         WantedlyScraper(headless=settings.playwright_headless, timeout_ms=settings.playwright_timeout_ms),
+        LinkedInScraper(headless=settings.playwright_headless, timeout_ms=settings.playwright_timeout_ms),
     ]
     orchestrator = ScraperOrchestrator(scrapers, repository)
     logger.info(

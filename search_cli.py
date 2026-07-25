@@ -41,14 +41,17 @@ from database.sqlalchemy_repository import SQLAlchemyJobRepository
 from models.enums import SourcePlatform
 from models.job_posting import JobPosting
 from scrapers.base import BaseScraper
+from scrapers.cli.linkedin import LinkedInScraper
 from scrapers.implementations.mynavi2027 import Mynavi2027Scraper
 from scrapers.implementations.wantedly import WantedlyScraper
+from job_hunter.agent_filter import filter_jobs
 
 # CLI source name -> scraper class.  Add a board here after registering
 # it in ``models/enums.py`` and creating its scraper implementation.
 _SCRAPERS: dict[str, type[BaseScraper]] = {
     "wantedly": WantedlyScraper,
     "mynavi2027": Mynavi2027Scraper,
+    "linkedin": LinkedInScraper,
 }
 
 _PROJECT_ROOT = Path(__file__).resolve().parent
@@ -133,7 +136,22 @@ async def run(args: argparse.Namespace) -> int:
             jobs, errors = await _fetch_all(scrapers)
             sources = args.sources
 
-        return await _process_and_report(repo, jobs, args, errors, sources)
+        # ---- Agent validation step ----
+        if args.validate and jobs:
+            raw_count = len(jobs)
+            jobs = await _run_validation(args, jobs)
+            logger.info(
+                "Agent validation completed",
+                extra={"before": raw_count, "after": len(jobs)},
+            )
+
+        exit_code = await _process_and_report(repo, jobs, args, errors, sources)
+
+        # Optional: write to Obsidian
+        if args.obsidian and jobs:
+            _write_obsidian(args, jobs)
+
+        return exit_code
     finally:
         await engine.dispose()
 
@@ -375,6 +393,103 @@ def _parse_sources(raw: str) -> list[str]:
     return chosen
 
 
+async def _run_validation(
+    args: argparse.Namespace,
+    jobs: list[JobPosting],
+) -> list[JobPosting]:
+    """Run agent validation filter and return only kept jobs."""
+    from models.job_posting import JobPosting as JP
+
+    job_dicts = [
+        {
+            "title": j.title,
+            "company": j.company,
+            "location": j.location,
+            "url": str(j.url),
+        }
+        for j in jobs
+    ]
+
+    result = await filter_jobs(
+        jobs=job_dicts,
+        profile=args.validate_profile,
+        mode=args.validate_mode,
+    )
+
+    if args.verbose:
+        print(
+            f"Agent filter ({result.stats['mode']}): "
+            f"{result.stats['kept']} kept / {result.stats['rejected']} rejected "
+            f"of {result.stats['total']} total",
+            file=sys.stderr,
+        )
+
+    # Reconstruct JobPosting objects for kept jobs
+    kept_urls = {j["url"] for j in result.kept}
+    return [j for j in jobs if str(j.url) in kept_urls]
+
+
+def _write_obsidian(args: argparse.Namespace, jobs: list[JobPosting]) -> None:
+    """Write job listings as a Markdown note in Obsidian vault."""
+    import os
+    from datetime import datetime, timezone
+    from pathlib import Path
+
+    vault = args.obsidian_path or os.environ.get("OBSIDIAN_VAULT_PATH", "")
+    if not vault:
+        # Auto-detect
+        for candidate in [
+            Path.home() / "Obsidian" / "Adi",
+            Path.home() / "Documents" / "Obsidian Vault",
+        ]:
+            if (candidate / ".obsidian").is_dir():
+                vault = str(candidate)
+                break
+    if not vault:
+        print("warning: Obsidian vault not found — skipping write", file=sys.stderr)
+        return
+
+    out_dir = Path(vault) / "job_hunter"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(timezone.utc)
+    ts = now.strftime("%Y-%m-%d_%H%M")
+    kw_slug = (args.keyword or "design").replace(" ", "-").lower()[:30]
+    filename = f"search_{kw_slug}_{ts}.md"
+    filepath = out_dir / filename
+
+    lines = [
+        f"# Job Search: {args.keyword or 'design roles (default)'}",
+        "",
+        f"**Query:** `{args.keyword or 'design roles (default)'}` · "
+        f"**Location:** `{args.location or 'tokyo'}`",
+        f"**Sources:** {', '.join(args.sources)}",
+        f"**Date:** {now.strftime('%Y-%m-%d %H:%M UTC')}",
+        "",
+        f"| Total | {len(jobs)} |",
+        "|---|---|",
+        "",
+        "## Jobs",
+        "",
+    ]
+
+    cur = None
+    for i, job in enumerate(jobs, 1):
+        p = job.source_platform.value
+        if p != cur:
+            cur = p
+            lines.append(f"### {p.upper()}")
+            lines.append("")
+        lines.append(f"{i}. **[{job.title}]({job.url})**")
+        lines.append(f"   Company: {job.company} | Location: {job.location}")
+        if job.salary:
+            lines.append(f"   Salary: {job.salary}")
+        lines.append("")
+
+    filepath.write_text("\n".join(lines), encoding="utf-8")
+    print(f"Obsidian note written: {filepath}", file=sys.stderr)
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="search_cli.py",
@@ -461,6 +576,35 @@ def _build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Log scraper progress to stderr.",
+    )
+    parser.add_argument(
+        "--obsidian",
+        action="store_true",
+        help="Write results as a Markdown note to the Obsidian vault "
+        "(auto-detected or set via OBSIDIAN_VAULT_PATH env var).",
+    )
+    parser.add_argument(
+        "--obsidian-path",
+        default=None,
+        help="Path to Obsidian vault (overrides auto-detection).",
+    )
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Run agent-based validation to filter out irrelevant jobs. "
+        "Uses regex heuristics by default; add --validate-mode llm for LLM.",
+    )
+    parser.add_argument(
+        "--validate-mode",
+        choices=["local", "llm"],
+        default="local",
+        help="Validation mode: 'local' (regex, free) or 'llm' (needs DEEPSEEK_API_KEY).",
+    )
+    parser.add_argument(
+        "--validate-profile",
+        choices=["designer", "frontend", "engineering", "any"],
+        default="designer",
+        help="Target role profile for agent validation. 'any' keeps all tech/design roles.",
     )
     return parser
 

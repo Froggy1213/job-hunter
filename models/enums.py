@@ -34,3 +34,10 @@ class SourcePlatform(StrEnum):
     real browser (Hermes browser tools) and fed in via ``search_cli.py
     --ingest``.
     """
+
+    LINKEDIN = "linkedin"
+    """LinkedIn Jobs -- scraped via ``opencli linkedin`` CLI (Chrome-based).
+
+    Requires Chrome running with the OpenCLI extension.  No Playwright needed
+    -- the CLI handles browser automation and returns structured JSON.
+    """
